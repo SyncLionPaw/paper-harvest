@@ -1,0 +1,33 @@
+# PyPI Trusted Publishing (OIDC): no long-lived PYPI token in repo secrets.
+# One-time PyPI setup: https://docs.pypi.org/trusted-publishers/
+# Create a "Pending publisher" for this repo + workflow filename (publish.yml).
+
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          version: "latest"
+
+      - name: Build
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
