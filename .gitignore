@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Test / lint / coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Secrets
+.mineru_token
+
+# paper-harvest runtime output
+*.pdf
+*.part
+papers/
+# article dirs created in cwd (e.g. 2403_18074/)
+[0-9][0-9][0-9][0-9]_*/
