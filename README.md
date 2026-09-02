@@ -1,15 +1,41 @@
 # paper-harvest
 
-Collect arXiv papers into a unified article directory: PDF, TeX source, optional Markdown, and a structured manifest.
+This repo holds two things:
 
-Python 3.9+, stdlib only at runtime. Two ways to use it:
+- **`skills/`** — a collection of agent skills, shipped as per-skill zips via GitHub Releases
+- **paper-harvest CLI** — the Python package (`src/`, published to PyPI) that the paper-harvest skill drives
 
-| Audience | How |
-|----------|-----|
-| Terminal / automation | `uvx paper-harvest` (PyPI) |
-| Cursor / Agent | Install the [skill zip](#cursor-skill) |
+## Skills
 
-## Quick start
+| Skill | Version | Summary |
+|-------|---------|---------|
+| [paper-harvest](skills/paper-harvest/) | 0.2.0 | Harvest arXiv papers into organized directories (PDF, TeX, Markdown) |
+| [ikkem-slurm](skills/ikkem-slurm/) | 0.1.0 | 向 ikkem 集群提交 SLURM 作业（实时探测分区/gres，提交+监控+回收） |
+
+**Install** — download `<name>-<version>-skill.zip` from releases, then:
+
+```bash
+unzip paper-harvest-0.2.0-skill.zip -d ~/.cursor/skills/
+```
+
+**Build locally:**
+
+```bash
+python tools/build_skill_zips.py --all              # every skill
+python tools/build_skill_zips.py --skill <name>     # one skill
+python tools/build_skill_zips.py --list             # name + version only
+```
+
+Skill sources live in `skills/<name>/` (`SKILL.md`, `references/`, `scripts/`).
+Each skill versions independently via the `version` field in its `SKILL.md`
+frontmatter; the build requires the directory name to match `name`.
+
+## paper-harvest CLI
+
+Collect arXiv papers into a unified article directory: PDF, TeX source,
+optional Markdown, and a structured manifest. Python 3.9+, stdlib only at runtime.
+
+### Quick start
 
 ```bash
 uvx paper-harvest 'https://arxiv.org/abs/2403.18074' --json
@@ -30,7 +56,7 @@ paper-harvest 'https://arxiv.org/abs/2403.18074' --json
 
 **Input:** arXiv URLs only (`arxiv.org`, `abs` / `pdf` / `src`).
 
-## Output
+### Output
 
 ```text
 <article_id>/
@@ -47,7 +73,7 @@ paper-harvest 'https://arxiv.org/abs/2403.18074' --json
 
 Each step reports `ok`, `skipped`, or `failed` in `harvest_result.json`. Failed steps do not remove earlier artifacts.
 
-## CLI flags
+### CLI flags
 
 | Flag | Effect |
 |------|--------|
@@ -58,7 +84,7 @@ Each step reports `ok`, `skipped`, or `failed` in `harvest_result.json`. Failed 
 | `--json` | Print structured JSON to stdout |
 | `--timeout <sec>` | Download timeout (default: 120) |
 
-## Markdown (MinerU)
+### Markdown (MinerU)
 
 Markdown is optional and uses [MinerU](https://mineru.net/).
 
@@ -81,35 +107,20 @@ Re-run Markdown only after adding a token:
 uvx paper-harvest '<same-arxiv-url>' --skip-tex --force --json
 ```
 
-## Cursor Skill
-
-The skill is Agent instructions only; execution still goes through the CLI.
-
-**Install** — download `paper-harvest-<version>-skill.zip` from releases:
-
-```bash
-unzip paper-harvest-0.2.0-skill.zip -d ~/.cursor/skills/
-```
-
-**Build locally:**
-
-```bash
-uv build
-python tools/build_skill_zip.py
-# → dist/paper-harvest-0.2.0-skill.zip
-```
-
-Skill sources live in `skill/` (`SKILL.md`, `references/`, `scripts/harvest.sh`).
+The [paper-harvest skill](skills/paper-harvest/) is Agent instructions only;
+execution still goes through this CLI.
 
 ## Project layout
 
 ```text
 paper-harvest/
   pyproject.toml
-  src/paper_harvest/     # CLI + core
-  skill/                   # Agent skill (shipped as zip)
+  src/paper_harvest/       # paper-harvest CLI + core
+  skills/                  # Agent skills, one directory per skill
+    paper-harvest/
+    ikkem-slurm/
   docs/spec.md             # product specification
-  tools/build_skill_zip.py
+  tools/build_skill_zips.py
   tests/
 ```
 
@@ -124,12 +135,20 @@ uvx --from . paper-harvest --help
 
 ## Publish
 
+**Python package** (PyPI, `uvx paper-harvest`):
+
 1. Bump `version` in `pyproject.toml` and `src/paper_harvest/__init__.py`
-2. `uv run pytest && uv build && python tools/build_skill_zip.py`
-3. Tag `v0.x.y`, push, attach `dist/*-skill.zip` to GitHub Release
-4. `uv publish` for PyPI (`uvx paper-harvest`)
+2. `uv run pytest && uv build`
+3. Tag `v0.x.y`, push — the `Publish to PyPI` workflow builds and publishes
+
+**Skills** (GitHub Releases, per-skill):
+
+1. Bump `version` in `skills/<name>/SKILL.md` frontmatter
+2. Merge to `main` — the `Release skills` workflow builds
+   `<name>-<version>-skill.zip` and creates release `skill-<name>-v<version>`
+3. Already-released versions are skipped; bump the version to re-publish
 
 ## Docs
 
 - `docs/spec.md` — product / engineering specification
-- `skill/references/` — Agent-facing reference (manifest schema, MinerU setup)
+- `skills/paper-harvest/references/` — Agent-facing reference (manifest schema, MinerU setup)

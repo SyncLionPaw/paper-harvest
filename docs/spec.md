@@ -17,7 +17,7 @@
 - agent 通过 `uvx` 直接调用
 - 后续自动化流程继续消费产出目录
 
-命令用法、安装方式和运行示例见仓库根目录 `README.md`。Agent 按需参考见 `skill/references/`。
+命令用法、安装方式和运行示例见仓库根目录 `README.md`。Agent 按需参考见 `skills/paper-harvest/references/`。
 
 ## 2. 目标用户
 

@@ -1,0 +1,62 @@
+# Incremental skill releases: on push to main touching skills/**, build and
+# publish a GitHub Release for each changed skill whose frontmatter version
+# has not been released yet (tag: skill-<name>-v<version>).
+
+name: Release skills
+
+on:
+  push:
+    branches: [main]
+    paths: ["skills/**"]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine candidate skills
+        id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "push" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            skills=$(git diff --name-only "$BEFORE"..HEAD -- skills/ | cut -d/ -f2 | sort -u | tr '\n' ' ')
+          else
+            skills=$(python3 tools/build_skill_zips.py --list | cut -d' ' -f1 | tr '\n' ' ')
+          fi
+          echo "candidates: $skills"
+          echo "skills=$skills" >> "$GITHUB_OUTPUT"
+
+      - name: Build and release skills
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SKILLS: ${{ steps.changed.outputs.skills }}
+        run: |
+          set -euo pipefail
+          for name in $SKILLS; do
+            version=$(python3 tools/build_skill_zips.py --list | awk -v n="$name" '$1==n {print $2}')
+            if [ -z "$version" ]; then
+              echo "::warning::skill '$name' has no skills/$name/SKILL.md, skipping"
+              continue
+            fi
+            tag="skill-${name}-v${version}"
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "::warning::$name: $tag already released. Bump version in skills/$name/SKILL.md to publish a new zip."
+              continue
+            fi
+            python3 tools/build_skill_zips.py --skill "$name"
+            gh release create "$tag" "dist/${name}-${version}-skill.zip" \
+              --title "$name skill v$version" --generate-notes
+          done

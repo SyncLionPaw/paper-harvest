@@ -1,12 +1,15 @@
 # PyPI Trusted Publishing (OIDC): no long-lived PYPI token in repo secrets.
 # One-time PyPI setup: https://docs.pypi.org/trusted-publishers/
 # Create a "Pending publisher" for this repo + workflow filename (publish.yml).
+#
+# Triggers only on Python package tags (v0.x.y). Skill releases use
+# skill-<name>-v<version> tags handled by release-skills.yml.
 
 name: Publish to PyPI
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"

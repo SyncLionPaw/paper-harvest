@@ -1,5 +1,6 @@
 ---
 name: paper-harvest
+version: "0.2.0"
 description: Harvest arXiv papers into organized directories with PDF, TeX source, and optional MinerU Markdown. Use when downloading or collecting paper assets, processing arxiv.org URLs (abs/pdf/src), reading or surveying a paper, or when the user gives an arXiv-style ID such as 2403.18074 or 2204.01018v1.
 ---
 
