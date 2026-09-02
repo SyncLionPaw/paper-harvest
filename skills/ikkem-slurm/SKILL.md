@@ -1,6 +1,6 @@
 ---
 name: ikkem-slurm
-version: "0.1.0"
+version: "0.1.1"
 description: 向 ikkem 集群（SLURM 调度）提交和管理长时间运行的 GPU/CPU 作业。适用于在 ikkem 上跑训练、DP-GEN、VASP、CP2K 等长任务，查看或取消已提交的作业，以及回收已完成作业的结果和日志。
 ---
 
@@ -46,13 +46,18 @@ target 配置在项目 `submit-job.json` 或 `~/.config/submit-job/config.json`�
 ```
 
 ```bash
-python3 scripts/submit.py submit --target ikkem --name <作业名> --cmd '<命令>' [--dry-run]
+python3 scripts/submit.py submit --target ikkem --name <作业名> --cmd '<命令>' \
+    [--src <本地目录>] [--dry-run]
 python3 scripts/submit.py status  --job <作业名>     # JSON: pending/running/completed/failed
 python3 scripts/submit.py logs    --job <作业名>     # 原始日志
 python3 scripts/submit.py cancel  --job <作业名>
 python3 scripts/submit.py collect --job <作业名>     # rsync 回收整个远程工作目录
 ```
 
+- **代码/数据上传**：`--src <本地目录>` 在提交前把该目录 rsync 到远程工作目录
+  （`~/submit-jobs/<作业名>/`），`--cmd` 里的相对路径即相对于该目录。
+  训练任务典型用法：`--src ./train_project --cmd 'module add <env> && python train.py'`。
+  注意目录里的 `.venv`、`__pycache__`、大数据文件也会一起传，先清理或精简再提交。
 - `--cmd` 里可以直接用 `module add <env> && <命令>` 加载环境。
 - 先 `--dry-run` 检查生成的 sbatch 脚本再真正提交。
 - 作业名即句柄，状态存于 `.submit-job/<作业名>.json`。
