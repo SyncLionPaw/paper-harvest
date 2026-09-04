@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Submit long-running jobs to compute backends (SLURM or plain SSH).
 
-Minimal interface: submit / status / logs / cancel / collect.
+Minimal interface: submit / status / logs / cancel / collect / list.
 All commands except `logs` print a single JSON object to stdout.
-Job state is stored per job in .submit-job/<name>.json under the cwd.
+Job state is stored per job in .submit-job/<name>.json under the cwd;
+run status/logs/cancel/collect from the same directory used at submit time.
 Targets (clusters / nodes) are defined in submit-job.json (project root)
 or ~/.config/submit-job/config.json.
 """
@@ -24,6 +25,7 @@ CONFIG_PATHS = [
     Path.home() / ".config" / "submit-job" / "config.json",
 ]
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
 
 
 def ok(**fields):
@@ -50,7 +52,7 @@ def qr(path):
 
 def ssh(host, remote_cmd, check=True):
     result = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", host, remote_cmd],
+        ["ssh", *SSH_OPTS, host, remote_cmd],
         capture_output=True, text=True,
     )
     if check and result.returncode != 0:
@@ -58,11 +60,12 @@ def ssh(host, remote_cmd, check=True):
     return result
 
 
-def rsync_up(host, src, workdir):
-    result = subprocess.run(
-        ["rsync", "-az", src.rstrip("/") + "/", f"{host}:{workdir}/"],
-        capture_output=True, text=True,
-    )
+def rsync_up(host, src, workdir, excludes=()):
+    cmd = ["rsync", "-az"]
+    for pattern in excludes:
+        cmd += ["--exclude", pattern]
+    cmd += [src.rstrip("/") + "/", f"{host}:{workdir}/"]
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         fail(f"rsync to {host}:{workdir} failed: {result.stderr.strip()}")
 
@@ -110,7 +113,8 @@ def save_state(state):
 def load_state(name):
     path = state_path(name)
     if not path.is_file():
-        fail(f"no state for job '{name}' (expected {path}); jobs are tracked by name")
+        fail(f"no state for job '{name}' (expected {path}); jobs are tracked by name. "
+             f"Run from the same directory used at submit time.")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -118,8 +122,8 @@ def render_sbatch(name, cmd, res):
     lines = [
         "#!/bin/bash",
         f"#SBATCH --job-name={name}",
-        f"#SBATCH --output=logs/%x-%j.out",
-        f"#SBATCH --error=logs/%x-%j.err",
+        "#SBATCH --output=logs/%x-%j.out",
+        "#SBATCH --error=logs/%x-%j.err",
     ]
     if res.get("time"):
         lines.append(f"#SBATCH --time={res['time']}")
@@ -159,6 +163,8 @@ def cmd_submit(args):
     workdir, plan = build_plan(args.name, args.cmd, cfg)
     if args.src:
         plan["sync"] = f"{args.src} -> {cfg['host']}:{workdir}"
+        if args.exclude:
+            plan["sync_excludes"] = args.exclude
 
     if args.dry_run:
         ok(dry_run=True, name=args.name, plan=plan)
@@ -167,7 +173,7 @@ def cmd_submit(args):
     host = cfg["host"]
     ssh(host, f"mkdir -p {qr(workdir)}/logs")
     if args.src:
-        rsync_up(host, args.src, workdir)
+        rsync_up(host, args.src, workdir, excludes=args.exclude)
 
     state = {
         "name": args.name, "backend": cfg["backend"], "host": host,
@@ -177,7 +183,7 @@ def cmd_submit(args):
 
     if cfg["backend"] == "slurm":
         result = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", host, f"cat > {qr(workdir)}/submit.sh"],
+            ["ssh", *SSH_OPTS, host, f"cat > {qr(workdir)}/submit.sh"],
             input=plan["script"], text=True, capture_output=True,
         )
         if result.returncode != 0:
@@ -210,8 +216,14 @@ def slurm_state(state):
     queued = ssh(host, f"squeue -j {jid} -h -o %T", check=False).stdout.strip()
     if queued:
         return queued.lower(), None
-    out = ssh(host, f"sacct -j {jid} -X -n -P --format=State,ExitCode",
-              check=False).stdout.strip()
+    # sacct lags behind job completion; retry briefly before giving up
+    out = ""
+    for _ in range(3):
+        out = ssh(host, f"sacct -j {jid} -X -n -P --format=State,ExitCode",
+                  check=False).stdout.strip()
+        if out:
+            break
+        time.sleep(2)
     if not out:
         return "unknown", None
     raw, exit_code = (out.split("|") + ["", ""])[:2]
@@ -221,6 +233,8 @@ def slurm_state(state):
         return "completed", 0
     if raw in ("PENDING", "RUNNING", "CONFIGURING"):
         return raw.lower(), None
+    if raw.startswith("CANCELLED"):
+        return "cancelled", code or None
     return "failed", code or None
 
 
@@ -240,21 +254,30 @@ def ssh_state(state):
     return ("running" if alive else "unknown"), None
 
 
+def query_state(state):
+    return (slurm_state if state["backend"] == "slurm" else ssh_state)(state)
+
+
 def cmd_status(args):
     state = load_state(args.job)
-    job_state, exit_code = (slurm_state if state["backend"] == "slurm"
-                            else ssh_state)(state)
+    job_state, exit_code = query_state(state)
     ok(name=args.job, backend=state["backend"], state=job_state,
        exit_code=exit_code, workdir=state["workdir"], log=state["log"])
 
 
 def cmd_logs(args):
     state = load_state(args.job)
-    result = ssh(state["host"], f"tail -n {args.lines} {qr(state['log'])}",
-                 check=False)
+    paths = [("stdout", state["log"])]
+    if state["backend"] == "slurm" and state["log"].endswith(".out"):
+        paths.append(("stderr", state["log"][:-len(".out")] + ".err"))
+    parts = []
+    for label, path in paths:
+        parts.append(f"echo '== {label}: {path} =='")
+        parts.append(f"tail -n {args.lines} {qr(path)} 2>/dev/null"
+                     f" || echo '(no output yet)'")
+    result = ssh(state["host"], "; ".join(parts), check=False)
     if result.returncode != 0:
-        fail(f"cannot read log yet: {result.stderr.strip() or 'log file not found'}",
-             log=state["log"])
+        fail(f"cannot read logs: {result.stderr.strip()}", log=state["log"])
     print(result.stdout, end="")
 
 
@@ -272,12 +295,12 @@ def cmd_cancel(args):
 
 def cmd_collect(args):
     state = load_state(args.job)
-    job_state, exit_code = (slurm_state if state["backend"] == "slurm"
-                            else ssh_state)(state)
+    job_state, exit_code = query_state(state)
     if job_state in ("running", "pending"):
         fail(f"job '{args.job}' is still {job_state}; collect after it finishes",
              state=job_state)
     dest = args.dest or f"./{args.job}"
+    Path(dest).expanduser().parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         ["rsync", "-az", f"{state['host']}:{state['workdir']}/", dest.rstrip("/") + "/"],
         capture_output=True, text=True,
@@ -285,6 +308,22 @@ def cmd_collect(args):
     if result.returncode != 0:
         fail(f"rsync failed: {result.stderr.strip()}")
     ok(name=args.job, state=job_state, exit_code=exit_code, dest=dest)
+
+
+def cmd_list(args):
+    jobs = []
+    if STATE_DIR.is_dir():
+        for path in sorted(STATE_DIR.glob("*.json")):
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            jobs.append({"name": state.get("name"),
+                         "backend": state.get("backend"),
+                         "host": state.get("host"),
+                         "submitted_at": state.get("submitted_at"),
+                         "workdir": state.get("workdir")})
+    ok(jobs=jobs)
 
 
 def main():
@@ -303,7 +342,11 @@ def main():
     p_submit.add_argument("--cmd", required=True, help="command to run remotely")
     p_submit.add_argument("--workdir", help="remote workdir (default: <base-dir>/<name>)")
     p_submit.add_argument("--src", help="local directory to rsync into the workdir")
-    p_submit.add_argument("--time", help="slurm wall limit, e.g. 24:00:00")
+    p_submit.add_argument("--exclude", action="append", default=[], metavar="PATTERN",
+                          help="rsync exclude pattern for --src, repeatable "
+                               "(e.g. --exclude .venv --exclude '__pycache__')")
+    p_submit.add_argument("--time", help="slurm wall limit, e.g. 24:00:00 "
+                          "(QOS default on ikkem is 2-00:00:00)")
     p_submit.add_argument("--partition", help="slurm partition")
     p_submit.add_argument("--cpus", type=int, help="slurm cpus-per-task")
     p_submit.add_argument("--mem", help="slurm memory, e.g. 32G")
@@ -318,7 +361,7 @@ def main():
     p_status.add_argument("--job", required=True)
     p_status.set_defaults(func=cmd_status)
 
-    p_logs = sub.add_parser("logs", help="print raw log tail to stdout")
+    p_logs = sub.add_parser("logs", help="print stdout+stderr log tails")
     p_logs.add_argument("--job", required=True)
     p_logs.add_argument("--lines", type=int, default=50)
     p_logs.set_defaults(func=cmd_logs)
@@ -331,6 +374,9 @@ def main():
     p_collect.add_argument("--job", required=True)
     p_collect.add_argument("--dest", help="local destination (default: ./<name>)")
     p_collect.set_defaults(func=cmd_collect)
+
+    p_list = sub.add_parser("list", help="list locally tracked jobs (cached info)")
+    p_list.set_defaults(func=cmd_list)
 
     args = parser.parse_args()
     args.func(args)
