@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Submit long-running jobs to compute backends (SLURM or plain SSH).
 
-Minimal interface: submit / status / logs / cancel / collect / list.
+Minimal interface: submit / status / logs / cancel / collect / list / probe.
 All commands except `logs` print a single JSON object to stdout.
 Job state is stored per job in .submit-job/<name>.json under the cwd;
 run status/logs/cancel/collect from the same directory used at submit time.
@@ -310,6 +310,34 @@ def cmd_collect(args):
     ok(name=args.job, state=job_state, exit_code=exit_code, dest=dest)
 
 
+def cmd_probe(args):
+    """Read-only cluster probe; prints raw sinfo/squeue/scontrol output."""
+    host = args.host
+    check = ssh(host, "true", check=False)
+    if check.returncode != 0:
+        fail(f"cannot reach '{host}': "
+             f"{check.stderr.strip() or 'ssh failed'}; "
+             f"timeout/no-route = not on intranet; "
+             f"otherwise check ssh config (alias may not be named ikkem)")
+    script = [
+        "echo '== sinfo -s =='; sinfo -s",
+        "echo; echo '== squeue =='; squeue",
+    ]
+    if args.partition:
+        p = q(args.partition)
+        script.append(f"echo; echo '== scontrol show partition {args.partition} =='; "
+                      f"scontrol show partition {p}")
+        script.append(
+            f"echo; echo '== gres of first node in {args.partition} =='; "
+            f"n=$(sinfo -p {p} -h -N -o %n | head -1); "
+            'echo "node: $n"; '
+            'scontrol show node "$n" | grep -E \'Gres|CfgTRES\' || true')
+    result = ssh(host, "; ".join(script), check=False)
+    if result.returncode != 0:
+        fail(f"probe failed: {result.stderr.strip()}")
+    print(result.stdout, end="")
+
+
 def cmd_list(args):
     jobs = []
     if STATE_DIR.is_dir():
@@ -377,6 +405,14 @@ def main():
 
     p_list = sub.add_parser("list", help="list locally tracked jobs (cached info)")
     p_list.set_defaults(func=cmd_list)
+
+    p_probe = sub.add_parser("probe", help="read-only cluster probe "
+                             "(sinfo/squeue/scontrol via ssh)")
+    p_probe.add_argument("--host", required=True,
+                         help="ssh destination (alias or user@host; do not assume 'ikkem')")
+    p_probe.add_argument("--partition",
+                         help="also show partition details and node gres")
+    p_probe.set_defaults(func=cmd_probe)
 
     args = parser.parse_args()
     args.func(args)

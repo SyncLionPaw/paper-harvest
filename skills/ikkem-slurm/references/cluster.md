@@ -8,17 +8,20 @@
 
 ## 实测快照（2026-09-03）
 
-- 登录节点主机名 `mu012`，本机 ssh 别名 `ikkem`。别名定义在 `~/.ssh/config`：
+- 登录节点主机名 `mu012`，地址 `10.26.14.64`（嘉庚/厦大内网，公网不可达）。
+  **认地址，不认别名**：在 `~/.ssh/config` 里找 `HostName 10.26.14.64`，
+  对应的 `Host` 叫什么都行（`ikkem` / `mu012` / `hpc` …），没配也很常见。
+  示例（`Host` 名、`User`、密钥路径都按用户实际填写）：
 
   ```
-  Host ikkem
+  Host <用户定的别名>
     HostName 10.26.14.64
-    User gongyulei
-    IdentityFile ~/.ssh/ikkem_id_rsa
+    User <用户名>
+    IdentityFile <密钥路径>
   ```
 
-  换机器使用时把该配置块写入对应机器的 `~/.ssh/config`（用户名/密钥路径按实际调整），
-  或把 target 里的 `host` 直接写成 `gongyulei@10.26.14.64`。
+  也可以不写别名，target 的 `host` 直接写成 `<用户名>@10.26.14.64`。
+  机器必须已在内网；不在内网时不要改 host、不要找公网入口。
 - 官方硬件口径：390 CPU 节点 + 6 GPU 节点（8× A100 80GB SXM，1.5TB 内存）+ 2 胖节点（2TB 内存）。
   注意：GPU 节点的 gres 类型标签实测是 `gpu:tesla:8`，与官方硬件描述（A100）不一致——
   gres 类型只是管理员起的标签，以 `scontrol show node` 实测为准。
