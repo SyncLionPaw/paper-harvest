@@ -1,7 +1,8 @@
 #!/bin/bash
 # english-words-reminder 词库管理脚本
 # 词库: ~/.english-words-reminder/words.txt
-# 格式: 单词<TAB>中文释义<TAB>没记住次数（释义可为空；次数永远在最后一列）
+# 格式: 单词<TAB>中文释义<TAB>添加日期(YYYY-MM-DD)<TAB>没记住次数
+# 释义/日期可为空（旧数据可能只有 2-3 列）；次数永远在最后一列
 # 次数带负号表示该词已移除（软删除）：保留在文件中，但 list/pick/count 不再出现
 
 set -euo pipefail
@@ -36,7 +37,7 @@ case "$cmd" in
                 echo "EXISTS: $word"
             fi
         else
-            printf '%s\t%s\t0\n' "$word" "$meaning" >> "$FILE"
+            printf '%s\t%s\t%s\t0\n' "$word" "$meaning" "$(date +%F)" >> "$FILE"
             echo "ADDED: $word"
         fi
         ;;
@@ -73,30 +74,42 @@ case "$cmd" in
         echo "REMOVED: $word (count=$new_count)"
         ;;
     list)
+        date_filter="${1:-}"
         if [ ! -s "$FILE" ]; then
             echo "词库为空"
             exit 0
         fi
-        # 跳过已移除（次数为负）的词，按没记住次数降序
-        awk -F '\t' 'BEGIN{OFS="\t"} $NF !~ /^-/ { print $NF, $0 }' "$FILE" | sort -rn | cut -f2-
+        # 跳过已移除（次数为负）的词，可按添加日期过滤，按没记住次数降序
+        awk -F '\t' -v d="$date_filter" 'BEGIN{OFS="\t"} $NF !~ /^-/ {
+            dt = (NF >= 4 ? $(NF-1) : "")
+            if (d == "" || dt == d) print $NF, $0
+        }' "$FILE" | sort -rn | cut -f2-
         ;;
     count)
-        awk -F '\t' '$NF !~ /^-/{ c++ } END{ print c+0 }' "$FILE"
+        date_filter="${1:-}"
+        awk -F '\t' -v d="$date_filter" '$NF !~ /^-/ {
+            dt = (NF >= 4 ? $(NF-1) : "")
+            if (d == "" || dt == d) c++
+        } END{ print c+0 }' "$FILE"
         ;;
     pick)
         n="${1:-3}"
+        date_filter="${2:-}"
         if [ ! -s "$FILE" ]; then
             echo "词库为空"
             exit 0
         fi
         # 按 没记住次数+1 加权随机抽取，答错多的词更容易被抽中
         # 已移除（次数为负）的词权重为 0，不会被抽中
+        # 可选第二个参数按添加日期过滤（如 pick 3 2026-09-06 只考当天记的词）
         # 输出: 单词<TAB>中文释义（释义供出题者核对答案，不要直接展示给用户）
-        awk -F '\t' -v n="$n" 'BEGIN{OFS="\t"}
+        awk -F '\t' -v n="$n" -v d="$date_filter" 'BEGIN{OFS="\t"}
         {
             words[NR] = $1
             meanings[NR] = (NF >= 3 ? $2 : "")
-            w[NR] = ($NF ~ /^-/) ? 0 : $NF + 1
+            dt = (NF >= 4 ? $(NF-1) : "")
+            in_range = (d == "" || dt == d)
+            w[NR] = (!in_range || $NF ~ /^-/) ? 0 : $NF + 1
             total += w[NR]
             count = NR
         }
