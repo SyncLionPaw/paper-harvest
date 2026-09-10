@@ -12,6 +12,7 @@ This repo holds two things:
 | [paper-harvest](skills/paper-harvest/) | 0.2.0 | Harvest arXiv papers into organized directories (PDF, TeX, Markdown) |
 | [ikkem-slurm](skills/ikkem-slurm/) | 0.1.0 | 向 ikkem 集群提交 SLURM 作业（实时探测分区/gres，提交+监控+回收） |
 | [donate-case](skills/donate-case/) | 0.1.0 | 自愿把编程 agent（Kimi Code / Claude Code / Codex）的对话轨迹打包上传到捐赠服务器 |
+| [llm-gateway-triage](skills/llm-gateway-triage/) | 0.1.0 | 排查 LLM 网关（LiteLLM）客户端访问故障：DNS → TLS → 存活 → 鉴权 逐跳定位 |
 
 **Install** — download `<name>-<version>-skill.zip` from releases, then:
 
